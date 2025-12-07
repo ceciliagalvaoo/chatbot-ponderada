@@ -46,11 +46,11 @@ def _load_emails_raw() -> str:
     return EMAILS_PATH.read_text(encoding="utf-8")
 
 
-# Busca e-mails que mencionam o funcionário ou valor específico da transação
-def find_related_emails(employee_name: str, amount: str) -> str:
+# Busca e-mails que mencionam o funcionário, valor ou descrição da transação
+def find_related_emails(employee_name: str, amount: str, description: str = "") -> str:
     """
-    Busca ingênua por nome do funcionário e/ou valor no texto dos e-mails.
-    Para um dataset pequeno é suficiente.
+    Busca por nome do funcionário, valor ou palavras-chave da descrição.
+    Útil para detectar fraudes contextuais onde itens são mencionados nos e-mails.
     """
     raw = _load_emails_raw()
     lines = raw.splitlines()
@@ -58,13 +58,31 @@ def find_related_emails(employee_name: str, amount: str) -> str:
     matches: List[str] = []
     name_lower = (employee_name or "").lower()
     amount_str = str(amount).strip()
+    
+    # Extrai palavras-chave da descrição (ex: "Walkie Talkies" → ["walkie", "talkies"])
+    desc_keywords = []
+    if description:
+        # Remove palavras comuns e pega só as relevantes
+        stop_words = {"de", "do", "da", "para", "com", "despesa", "compra", "gasto"}
+        words = description.lower().replace("-", " ").split()
+        desc_keywords = [w for w in words if len(w) > 3 and w not in stop_words]
 
-    # Procura linha por linha por menções ao nome ou valor
+    # Procura linha por linha
     for ln in lines:
-        if name_lower and name_lower in ln.lower():
+        ln_lower = ln.lower()
+        
+        # Busca por nome do funcionário
+        if name_lower and name_lower in ln_lower:
             matches.append(ln)
+        # Busca por valor exato
         elif amount_str and amount_str in ln:
             matches.append(ln)
+        # Busca por palavras-chave da descrição (mais flexível)
+        elif desc_keywords:
+            for keyword in desc_keywords:
+                if keyword in ln_lower:
+                    matches.append(ln)
+                    break  # Não duplicar a mesma linha
 
     # Limita para não explodir o contexto do LLM
     if len(matches) > 80:
@@ -89,9 +107,10 @@ def check_transaction_with_context(row: Dict[str, Any]) -> Dict[str, Any]:
     # Extrai informações da transação
     employee = row.get("funcionario", "") or row.get("employee", "")
     amount = row.get("valor", "") or row.get("amount", "")
+    description = row.get("descricao", "") or row.get("description", "")
 
-    # Busca e-mails relacionados a esta transação
-    emails_context = find_related_emails(employee, str(amount))
+    # Busca e-mails relacionados a esta transação (nome, valor OU descrição)
+    emails_context = find_related_emails(employee, str(amount), description)
 
     # Se não há e-mails relacionados, marca como não suspeito
     if not emails_context.strip():

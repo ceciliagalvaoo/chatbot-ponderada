@@ -1,0 +1,5 @@
+groq
+numpy
+pandas
+python-dotenv
+streamlit
